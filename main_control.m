@@ -99,7 +99,7 @@ global Main_S_SR association_flag trial_duration quiet_window lick_threshold...
 
         % Process all TTL1 edges that are due
         while ~isempty(ttl1_edge_times_s) && ttl1_edge_idx <= numel(ttl1_edge_times_s) && ...
-                t_now >= ttl1_edge_times_s(ttl1_edge_idx) && trial_started_flag
+                t_now >= ttl1_edge_times_s(ttl1_edge_idx)
 
             ttl1_current_state = logical(ttl1_edge_states(ttl1_edge_idx));
             ttl1_edge_idx = ttl1_edge_idx + 1;
