@@ -12,7 +12,29 @@ session_stopping_flag = true;
 % Helper: tiny pause to avoid CPU pegging in while-loops
 spinPause = @() pause(0.001);
 
-%% Delete listeners early to prevent callbacks during shutdown
+%% Stop Camera_S FIRST so no camera frame is triggered after logging ends
+try
+    if ~isempty(Camera_S)
+        try
+            stop(Camera_S);
+        catch
+        end
+        try
+            while isprop(Camera_S,'Running') && Camera_S.Running
+                spinPause();
+            end
+        catch
+        end
+        Camera_S = [];
+    end
+catch
+end
+
+% Let Log_S deliver its last buffered chunk(s) through lh2 so the final
+% camera pulses are written to log_continuous.bin (> notify interval)
+pause(0.3);
+
+%% Delete listeners to prevent callbacks during shutdown
 try
     if ~isempty(lh1) && isvalid(lh1)
         delete(lh1);
@@ -71,24 +93,6 @@ try
         end
         Log_S.release();
         Log_S = [];
-    end
-catch
-end
-
-%% Stop Camera_S
-try
-    if ~isempty(Camera_S)
-        try
-            stop(Camera_S);
-        catch
-        end
-        try
-            while isprop(Camera_S,'Running') && Camera_S.Running
-                spinPause();
-            end
-        catch
-        end
-        Camera_S = [];
     end
 catch
 end
