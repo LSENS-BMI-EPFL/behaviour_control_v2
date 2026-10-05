@@ -1,5 +1,5 @@
  function defining_sessions
- % DEFINING_SESSIONS Define sessions for data acquisition.queueOutputData
+ % DEFINING_SESSIONS Define sessions for data acquisition.
 
     % Define all global variables
 
@@ -19,7 +19,10 @@
         ttl1_edge_times_s ttl1_edge_states ttl1_edge_idx ttl1_current_state ...
         ttl2_edge_times_s ttl2_edge_states ttl2_edge_idx ttl2_current_state ...
         wh_stim_amp_pool wh_stim_amp_pool_idx wh_stim_amp_pool_key ...
-        session_stopping_flag
+        session_stopping_flag wh_stim_amp_last wh_stim_amp_mT_last ...
+        light_stim_amp_last light_stim_power_last ...
+        ttl1_pulse_pending ttl1_pending_edge_times_s ttl1_pending_edge_states ...
+        ttl1_pulse_active ttl1_pulse_start_time pdco_on_flag_last pdco_off_flag_last
 
 
     % Initialize variables and result file
@@ -224,10 +227,23 @@
     ttl2_edge_idx = 1;
     ttl2_current_state = false;
 
+    ttl1_pulse_pending = false;
+    ttl1_pending_edge_times_s = [];
+    ttl1_pending_edge_states = [];
+    ttl1_pulse_active = false;
+    ttl1_pulse_start_time = tic;
+    pdco_on_flag_last = 0;
+    pdco_off_flag_last = 0;
+
     % Initialize whisker amplitude pool
     wh_stim_amp_pool = [];
     wh_stim_amp_pool_idx = 1;
     wh_stim_amp_pool_key = '';
+
+    wh_stim_amp_last = [];
+    wh_stim_amp_mT_last = [];
+    light_stim_amp_last = [];
+    light_stim_power_last = [];
 
     % Update parameters in GUI
     update_parameters;

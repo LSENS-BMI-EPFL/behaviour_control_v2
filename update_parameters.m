@@ -24,7 +24,9 @@ global   association_flag response_window trial_duration quiet_window lick_thres
     ttl1_edge_times_s ttl1_edge_states ttl1_edge_idx ...
     ttl2_edge_times_s ttl2_edge_states ttl2_edge_idx ...
     ttl1_current_state ttl2_current_state pdco_prev_ch2_start pdco_trial pdco_activation pdco_is_on ...
-    pdco_alternate_start_block main_gui
+    pdco_alternate_start_block main_gui is_retry ...
+    pdco_on_flag_last pdco_off_flag_last ...
+    ttl1_pulse_pending ttl1_pending_edge_times_s ttl1_pending_edge_states ttl1_pulse_active
 
 
 % outputSingleScan(Trigger_S,[0 0 0])
@@ -218,6 +220,17 @@ else
     n_completed_trials=0;
 end
 
+% Detect whether this call is a retry of the trial that was just aborted by an early lick (perf==6). Early-lick trials don't count toward
+% n_completed_trials, so a retry looks identical to the aborted attempt from the pool's perspective - but without this check, main_trial_pool
+% gets reshuffled whenever the aborted trial happened to be trial 1 of the block, and the whisker/light amplitude pool advances regardless,
+% both handing the retry a different trial type/amplitude than the one just aborted.
+
+if trial_number > 1 && height(results) > 0
+    is_retry = results.perf(end) == 6;
+else
+    is_retry = false;
+end
+
 % Size of pool (i.e. trial block) to get trials from
 % If context is not used:
 main_pool_size = aud_stim_weight + wh_stim_weight + light_stim_weight + no_stim_weight;
@@ -242,7 +255,7 @@ stim_light_list = [TRIAL_NOSTIM, TRIAL_AUD, TRIAL_WH, ...
     TRIAL_OPTO_NOSTIM, TRIAL_OPTO_AUD, TRIAL_OPTO_WH, TRIAL_OPTO_CTRL, TRIAL_LIGHT];
 
 is_new_block = ...
-    mod(n_completed_trials, main_pool_size) == 0 || ...
+    (mod(n_completed_trials, main_pool_size) == 0 && ~is_retry) || ...
     main_pool_size_old ~= main_pool_size || ...
     stim_proba_old ~= stim_proba || ...
     aud_stim_proba_old ~= aud_stim_proba || ...
@@ -608,7 +621,7 @@ else
         impulse_down = impulse_down(2:end);
         impulse = [impulse_up' wh_scaling_factor*impulse_down'];
 
-        [wh_stim_amp, wh_stim_amp_mT] = get_whisker_stim_amp(handles2give);
+        [wh_stim_amp, wh_stim_amp_mT] = get_whisker_stim_amp(handles2give, is_retry);
         wh_vec = wh_stim_amp * [zeros(1,baseline_window*Stim_S_SR/1000) impulse];
         wh_vec = [wh_vec zeros(1,trial_duration*Stim_S_SR/1000 - numel(wh_vec))];
 
@@ -625,7 +638,7 @@ else
         wh_stim_amp_mT = 0;
         wh_vec = zeros(1,(trial_duration)*(Stim_S_SR/1000));
 
-        [light_amp, light_power] = get_light_stim_amp(handles2give);
+        [light_amp, light_power] = get_light_stim_amp(handles2give, is_retry);
 
         % Square pulse of light_amp volts, lasting light_duration ms,
         % starting right after the baseline window (same onset
@@ -672,243 +685,258 @@ end
 pdco_on_flag  = 0;   % gates TTL ch1
 pdco_off_flag = 0;   % gates TTL ch2
 
-if isempty(pdco_block_mode_started)
-    pdco_block_mode_started = false;
-end
-if isempty(pdco_activation_block_counter)
-    pdco_activation_block_counter = NaN;
-end
-if isempty(pdco_prev_config_key)
-    pdco_prev_config_key = '';
-end
-if isempty(pdco_continuous_stop_armed)
-    pdco_continuous_stop_armed = false;
-end
-if isempty(pdco_prev_ch2_start)
-    pdco_prev_ch2_start = false;
-end
-if isempty(pdco_is_on)
-    pdco_is_on = 0;
-end
-if isempty(pdco_trial)
-    pdco_trial = 0;
-end
-if isempty(pdco_activation)
-    pdco_activation = 0;
-end
-if isempty(pdco_alternate_start_block)
-    pdco_alternate_start_block = NaN;
-end
+if isempty(pdco_on_flag_last),  pdco_on_flag_last  = 0; end
+if isempty(pdco_off_flag_last), pdco_off_flag_last = 0; end
 
-cfg_exp = '';
-cfg_block = '';
-cfg_start = '';
-cfg_repeat = '';
-cfg_ch2 = 0;
-
-if isfield(handles2give,'ttl_session') && handles2give.ttl_session && ...
-        ~isempty(TTL_info) && isfield(TTL_info,'exp_design')
-
-    if isfield(TTL_info,'exp_design'),      cfg_exp = TTL_info.exp_design; end
-    if isfield(TTL_info,'block_design'),    cfg_block = TTL_info.block_design; end
-    if isfield(TTL_info,'ttl_ch1_start'),   cfg_start = TTL_info.ttl_ch1_start; end
-    if isfield(TTL_info,'repeat_ttl_ch1'),  cfg_repeat = TTL_info.repeat_ttl_ch1; end
-    if isfield(TTL_info,'ttl_ch2_start'),   cfg_ch2 = double(TTL_info.ttl_ch2_start); end
-
-    current_pdco_config_key = sprintf('%s|%s|%s|%s', ...
-        cfg_exp, cfg_block, cfg_start, cfg_repeat);
-
-    % Reset state when TTL GUI config changes
-    if ~strcmp(current_pdco_config_key, pdco_prev_config_key)
+if is_retry
+    % Don't re-decide anything on a retry - reuse exactly what was
+    % decided for the aborted attempt, so pdco_is_on / block-position
+    % bookkeeping stays consistent with what actually happened.
+    pdco_on_flag = pdco_on_flag_last;
+    pdco_off_flag = pdco_off_flag_last;
+else
+    if isempty(pdco_block_mode_started)
         pdco_block_mode_started = false;
+    end
+    if isempty(pdco_activation_block_counter)
         pdco_activation_block_counter = NaN;
-        pdco_trial_on_flags = [];
-        pdco_trial_off_flags = [];
+    end
+    if isempty(pdco_prev_config_key)
+        pdco_prev_config_key = '';
+    end
+    if isempty(pdco_continuous_stop_armed)
         pdco_continuous_stop_armed = false;
-        pdco_alternate_start_block = NaN;
-
-        % Reset saved PdCO state
+    end
+    if isempty(pdco_prev_ch2_start)
+        pdco_prev_ch2_start = false;
+    end
+    if isempty(pdco_is_on)
         pdco_is_on = 0;
+    end
+    if isempty(pdco_trial)
         pdco_trial = 0;
+    end
+    if isempty(pdco_activation)
         pdco_activation = 0;
-
-        pdco_prev_config_key = current_pdco_config_key;
+    end
+    if isempty(pdco_alternate_start_block)
+        pdco_alternate_start_block = NaN;
     end
 
-    switch TTL_info.exp_design
+    cfg_exp = '';
+    cfg_block = '';
+    cfg_start = '';
+    cfg_repeat = '';
+    cfg_ch2 = 0;
 
-        case 'Block'
+    if isfield(handles2give,'ttl_session') && handles2give.ttl_session && ...
+            ~isempty(TTL_info) && isfield(TTL_info,'exp_design')
 
-            switch cfg_start
-                case 'Session start'
-                    if trial_number == 1
-                        pdco_block_mode_started = true;
-                        if isnan(pdco_activation_block_counter)
+        if isfield(TTL_info,'exp_design'),      cfg_exp = TTL_info.exp_design; end
+        if isfield(TTL_info,'block_design'),    cfg_block = TTL_info.block_design; end
+        if isfield(TTL_info,'ttl_ch1_start'),   cfg_start = TTL_info.ttl_ch1_start; end
+        if isfield(TTL_info,'repeat_ttl_ch1'),  cfg_repeat = TTL_info.repeat_ttl_ch1; end
+        if isfield(TTL_info,'ttl_ch2_start'),   cfg_ch2 = double(TTL_info.ttl_ch2_start); end
+
+        current_pdco_config_key = sprintf('%s|%s|%s|%s', ...
+            cfg_exp, cfg_block, cfg_start, cfg_repeat);
+
+        % Reset state when TTL GUI config changes
+        if ~strcmp(current_pdco_config_key, pdco_prev_config_key)
+            pdco_block_mode_started = false;
+            pdco_activation_block_counter = NaN;
+            pdco_trial_on_flags = [];
+            pdco_trial_off_flags = [];
+            pdco_continuous_stop_armed = false;
+            pdco_alternate_start_block = NaN;
+
+            % Reset saved PdCO state
+            pdco_is_on = 0;
+            pdco_trial = 0;
+            pdco_activation = 0;
+
+            pdco_prev_config_key = current_pdco_config_key;
+        end
+
+        switch TTL_info.exp_design
+
+            case 'Block'
+
+                switch cfg_start
+                    case 'Session start'
+                        if trial_number == 1
+                            pdco_block_mode_started = true;
+                            if isnan(pdco_activation_block_counter)
+                                pdco_activation_block_counter = pdco_block_counter;
+                            end
+                        end
+
+                    case 'Next block'
+                        if is_new_block && trial_number > 1 && ~pdco_block_mode_started
+                            pdco_block_mode_started = true;
                             pdco_activation_block_counter = pdco_block_counter;
                         end
-                    end
 
-                case 'Next block'
-                    if is_new_block && trial_number > 1 && ~pdco_block_mode_started
-                        pdco_block_mode_started = true;
-                        pdco_activation_block_counter = pdco_block_counter;
-                    end
+                    otherwise
+                        pdco_block_mode_started = false;
+                        pdco_activation_block_counter = NaN;
+                        pdco_continuous_stop_armed = false;
+                        pdco_alternate_start_block = NaN;
 
-                otherwise
-                    pdco_block_mode_started = false;
-                    pdco_activation_block_counter = NaN;
-                    pdco_continuous_stop_armed = false;
-                    pdco_alternate_start_block = NaN;
+                        pdco_is_on = 0;
+                        pdco_trial = 0;
+                        pdco_activation = 0;
+                end
 
-                    pdco_is_on = 0;
-                    pdco_trial = 0;
-                    pdco_activation = 0;
-            end
+                if pdco_block_mode_started
 
-            if pdco_block_mode_started
+                    switch TTL_info.block_design
+                        case 'Alternate blocks'
+                            if isnan(pdco_alternate_start_block)
+                                pdco_alternate_start_block = pdco_block_counter;
+                            end
 
-                switch TTL_info.block_design
-                    case 'Alternate blocks'
-                        if isnan(pdco_alternate_start_block)
-                            pdco_alternate_start_block = pdco_block_counter;
-                        end
+                            is_pdco_alt_block = ...
+                                pdco_block_counter >= pdco_alternate_start_block && ...
+                                mod(pdco_block_counter - pdco_alternate_start_block, 2) == 0;
 
-                        is_pdco_alt_block = ...
-                            pdco_block_counter >= pdco_alternate_start_block && ...
-                            mod(pdco_block_counter - pdco_alternate_start_block, 2) == 0;
+                            if is_pdco_alt_block
+                                if is_new_block && ~pdco_is_on
+                                    pdco_on_flag = 1;
+                                end
 
-                        if is_pdco_alt_block
-                            if is_new_block && ~pdco_is_on
+                                if is_last_trial_in_block && (pdco_is_on || pdco_on_flag)
+                                    pdco_off_flag = 1;
+                                end
+                            end
+                        case 'First half'
+                            if is_new_block && ...
+                                    pdco_block_counter >= pdco_activation_block_counter && ...
+                                    ~pdco_is_on
                                 pdco_on_flag = 1;
                             end
 
-                            if is_last_trial_in_block && (pdco_is_on || pdco_on_flag)
+                            if trial_in_block_idx == first_half_last_idx && ...
+                                    pdco_block_counter >= pdco_activation_block_counter && ...
+                                    (pdco_is_on || pdco_on_flag)
                                 pdco_off_flag = 1;
                             end
-                        end
-                    case 'First half'
-                        if is_new_block && ...
-                                pdco_block_counter >= pdco_activation_block_counter && ...
-                                ~pdco_is_on
-                            pdco_on_flag = 1;
-                        end
 
-                        if trial_in_block_idx == first_half_last_idx && ...
-                                pdco_block_counter >= pdco_activation_block_counter && ...
-                                (pdco_is_on || pdco_on_flag)
-                            pdco_off_flag = 1;
-                        end
+                        case 'Second half'
+                            if trial_in_block_idx == second_half_first_idx && ...
+                                    pdco_block_counter >= pdco_activation_block_counter && ...
+                                    ~pdco_is_on
+                                pdco_on_flag = 1;
+                            end
 
-                    case 'Second half'
-                        if trial_in_block_idx == second_half_first_idx && ...
-                                pdco_block_counter >= pdco_activation_block_counter && ...
-                                ~pdco_is_on
-                            pdco_on_flag = 1;
-                        end
+                            if is_last_trial_in_block && ...
+                                    pdco_block_counter >= pdco_activation_block_counter && ...
+                                    (pdco_is_on || pdco_on_flag)
+                                pdco_off_flag = 1;
+                            end
 
-                        if is_last_trial_in_block && ...
-                                pdco_block_counter >= pdco_activation_block_counter && ...
-                                (pdco_is_on || pdco_on_flag)
-                            pdco_off_flag = 1;
-                        end
+                        case 'Continuous'
+                            % Arm one-shot OFF only on button rising edge
+                            if cfg_ch2 && ~pdco_prev_ch2_start
+                                pdco_continuous_stop_armed = true;
+                            end
 
-                    case 'Continuous'
-                        % Arm one-shot OFF only on button rising edge
-                        if cfg_ch2 && ~pdco_prev_ch2_start
-                            pdco_continuous_stop_armed = true;
-                        end
+                            % Repeat TTL1 only while block mode is still active
+                            switch cfg_repeat
 
-                        % Repeat TTL1 only while block mode is still active
-                        switch cfg_repeat
+                                case 'Every N trials'
+                                    repeat_n = max(1, round(TTL_info.repeat_ttl_ch1_n));
+                                    if mod(trial_in_block_idx-1, repeat_n) == 0 && ...
+                                            pdco_block_counter >= pdco_activation_block_counter && ...
+                                            pdco_block_mode_started
+                                        pdco_on_flag = 1;
+                                    end
 
-                            case 'Every N trials'                                
-                                repeat_n = max(1, round(TTL_info.repeat_ttl_ch1_n));
-                                if mod(trial_in_block_idx-1, repeat_n) == 0 && ...
-                                        pdco_block_counter >= pdco_activation_block_counter && ...
-                                        pdco_block_mode_started
-                                    pdco_on_flag = 1;
-                                end
+                                case 'Every block start'
+                                    if is_new_block && ...
+                                            pdco_block_counter >= pdco_activation_block_counter && ...
+                                            pdco_block_mode_started
+                                        pdco_on_flag = 1;
+                                    end
 
-                            case 'Every block start'
-                                if is_new_block && ...
-                                        pdco_block_counter >= pdco_activation_block_counter && ...
-                                        pdco_block_mode_started
-                                    pdco_on_flag = 1;
-                                end
+                                case 'Never'
+                                    if is_new_block && ...
+                                            pdco_block_counter == pdco_activation_block_counter && ...
+                                            pdco_block_mode_started && ...
+                                            ~pdco_is_on
+                                        pdco_on_flag = 1;
+                                    end
+                            end
 
-                            case 'Never'
-                                if is_new_block && ...
-                                        pdco_block_counter == pdco_activation_block_counter && ...
-                                        pdco_block_mode_started && ...
-                                        ~pdco_is_on
-                                    pdco_on_flag = 1;
-                                end
-                        end
+                            % Fire OFF once at last trial of current block, then stop further TTL1 repetition
+                            if pdco_continuous_stop_armed && is_last_trial_in_block && ...
+                                    pdco_block_counter >= pdco_activation_block_counter && ...
+                                    (pdco_is_on || pdco_on_flag)
 
-                        % Fire OFF once at last trial of current block, then stop further TTL1 repetition
-                        if pdco_continuous_stop_armed && is_last_trial_in_block && ...
-                                pdco_block_counter >= pdco_activation_block_counter && ...
-                                (pdco_is_on || pdco_on_flag)
-
-                            pdco_off_flag = 1;
-                            pdco_continuous_stop_armed = false;
-                            pdco_block_mode_started = false;
-                            pdco_activation_block_counter = NaN;
-                        end
-                end
-            end
-
-        case 'Trial'
-
-            if is_new_block || isempty(pdco_trial_on_flags) || isempty(pdco_trial_off_flags)
-
-                pdco_trial_on_flags  = zeros(1, numel(main_trial_pool));
-                pdco_trial_off_flags = zeros(1, numel(main_trial_pool));
-
-                % Catch = no stim + opto no stim
-                catch_idx = find(main_trial_pool == stim_light_list(1) | main_trial_pool == stim_light_list(4));
-                n_catch = numel(catch_idx);
-                n_on_catch = round(n_catch * TTL_info.catch_prob);
-                v = [ones(1,n_on_catch), zeros(1,n_catch-n_on_catch)];
-                if ~isempty(v)
-                    v = v(randperm(numel(v)));
-                    pdco_trial_on_flags(catch_idx) = v;
-                    pdco_trial_off_flags(catch_idx) = v;
+                                pdco_off_flag = 1;
+                                pdco_continuous_stop_armed = false;
+                                pdco_block_mode_started = false;
+                                pdco_activation_block_counter = NaN;
+                            end
+                    end
                 end
 
-                % Auditory = aud + opto aud
-                auditory_idx = find(main_trial_pool == stim_light_list(2) | main_trial_pool == stim_light_list(5));
-                n_aud = numel(auditory_idx);
-                n_on_aud = round(n_aud * TTL_info.aud_prob);
-                v = [ones(1,n_on_aud), zeros(1,n_aud-n_on_aud)];
-                if ~isempty(v)
-                    v = v(randperm(numel(v)));
-                    pdco_trial_on_flags(auditory_idx) = v;
-                    pdco_trial_off_flags(auditory_idx) = v;
+            case 'Trial'
+
+                if is_new_block || isempty(pdco_trial_on_flags) || isempty(pdco_trial_off_flags)
+
+                    pdco_trial_on_flags  = zeros(1, numel(main_trial_pool));
+                    pdco_trial_off_flags = zeros(1, numel(main_trial_pool));
+
+                    % Catch = no stim + opto no stim
+                    catch_idx = find(main_trial_pool == stim_light_list(1) | main_trial_pool == stim_light_list(4));
+                    n_catch = numel(catch_idx);
+                    n_on_catch = round(n_catch * TTL_info.catch_prob);
+                    v = [ones(1,n_on_catch), zeros(1,n_catch-n_on_catch)];
+                    if ~isempty(v)
+                        v = v(randperm(numel(v)));
+                        pdco_trial_on_flags(catch_idx) = v;
+                        pdco_trial_off_flags(catch_idx) = v;
+                    end
+
+                    % Auditory = aud + opto aud
+                    auditory_idx = find(main_trial_pool == stim_light_list(2) | main_trial_pool == stim_light_list(5));
+                    n_aud = numel(auditory_idx);
+                    n_on_aud = round(n_aud * TTL_info.aud_prob);
+                    v = [ones(1,n_on_aud), zeros(1,n_aud-n_on_aud)];
+                    if ~isempty(v)
+                        v = v(randperm(numel(v)));
+                        pdco_trial_on_flags(auditory_idx) = v;
+                        pdco_trial_off_flags(auditory_idx) = v;
+                    end
+
+                    % Whisker = whisker + opto whisker
+                    whisker_idx = find(main_trial_pool == stim_light_list(3) | main_trial_pool == stim_light_list(6));
+                    n_wh = numel(whisker_idx);
+                    n_on_wh = round(n_wh * TTL_info.wh_prob);
+                    v = [ones(1,n_on_wh), zeros(1,n_wh-n_on_wh)];
+                    if ~isempty(v)
+                        v = v(randperm(numel(v)));
+                        pdco_trial_on_flags(whisker_idx) = v;
+                        pdco_trial_off_flags(whisker_idx) = v;
+                    end
                 end
 
-                % Whisker = whisker + opto whisker
-                whisker_idx = find(main_trial_pool == stim_light_list(3) | main_trial_pool == stim_light_list(6));
-                n_wh = numel(whisker_idx);
-                n_on_wh = round(n_wh * TTL_info.wh_prob);
-                v = [ones(1,n_on_wh), zeros(1,n_wh-n_on_wh)];
-                if ~isempty(v)
-                    v = v(randperm(numel(v)));
-                    pdco_trial_on_flags(whisker_idx) = v;
-                    pdco_trial_off_flags(whisker_idx) = v;
-                end
-            end
+                pdco_on_flag  = logical(pdco_trial_on_flags(trial_in_block_idx));
+                pdco_off_flag = logical(pdco_trial_off_flags(trial_in_block_idx));
 
-            pdco_on_flag  = logical(pdco_trial_on_flags(trial_in_block_idx));
-            pdco_off_flag = logical(pdco_trial_off_flags(trial_in_block_idx));
-
-        otherwise
-            pdco_on_flag = 0;
-            pdco_off_flag = 0;
+            otherwise
+                pdco_on_flag = 0;
+                pdco_off_flag = 0;
+        end
     end
 
     % Remember current button state for rising-edge detection next trial
     pdco_prev_ch2_start = logical(cfg_ch2);
+
+    % Save this trial's fresh decision for a potential retry
+    pdco_on_flag_last = pdco_on_flag;
+    pdco_off_flag_last = pdco_off_flag;
 end
 %% PdCo trial-state labels for saving
 pdco_activation = 0;
@@ -934,36 +962,45 @@ elseif pdco_off_flag
     pdco_is_on = 0;
 end
 %% Build TTL vectors for this trial (static TTL session, no queueing)
+% CH2 (off-pulse) rebuilt fresh every trial as before - it starts at
+% response_window_end, always after the early-lick window closes, so it
+% can never be truncated by an abort (see TTL_build_trial_vectors.m).
 if isfield(handles2give,'ttl_session') && handles2give.ttl_session
-    [ttl1_vec, ttl2_vec] = TTL_build_trial_vectors(trial_duration);
-
-    if ~pdco_on_flag
-        ttl1_vec(:) = false;
-    end
-
+    [~, ttl2_vec] = TTL_build_trial_vectors(trial_duration);
     if ~pdco_off_flag
         ttl2_vec(:) = false;
     end
 else
-    ttl1_vec = false(0,1);
     ttl2_vec = false(0,1);
 end
 
-%% Convert TTL vectors into edge schedules for non-blocking playback
 if ~isempty(TTL_info) && isfield(TTL_info,'fs') && ~isempty(TTL_info.fs)
     ttl_fs = TTL_info.fs;
 else
     ttl_fs = 10000;
 end
 
-[ttl1_edge_times_s, ttl1_edge_states] = ttl_vec_to_edges(ttl1_vec, ttl_fs);
 [ttl2_edge_times_s, ttl2_edge_states] = ttl_vec_to_edges(ttl2_vec, ttl_fs);
-
-% ttl1_edge_idx = 1;
-% ttl2_edge_idx = 1;
-
-ttl1_current_state = false;
 ttl2_current_state = false;
+
+% CH1 (PdCO on-pulse): must survive an early-lick abort of the
+% triggering trial as a standalone physical event, so its shape is only
+% (re)computed when a genuinely NEW pulse is starting - never on retry,
+% and never while a previous pulse is still in flight. It's staged as
+% "pending" here; main_control.m anchors it to an absolute start time
+% at the moment the triggering trial actually begins (not known yet
+% here, since this trial may still be waiting out its ITI).
+if isempty(ttl1_pulse_active)
+    ttl1_pulse_active = false;
+end
+
+if isfield(handles2give,'ttl_session') && handles2give.ttl_session && ...
+        pdco_on_flag && ~ttl1_pulse_active
+
+    [ttl1_vec, ~] = TTL_build_trial_vectors(trial_duration);
+    [ttl1_pending_edge_times_s, ttl1_pending_edge_states] = ttl_vec_to_edges(ttl1_vec, ttl_fs);
+    ttl1_pulse_pending = true;
+end
 
 % disp(['pdco_on_flag = ' num2str(pdco_on_flag)])
 % disp(['pdco_off_flag = ' num2str(pdco_off_flag)])
@@ -1250,7 +1287,7 @@ reaction_time=0;
 % Give user extra time to start video and 2P acquisition before 1st trial start.
 % Added to iti condition for trial start in main_control.
 if trial_number == 1
-    extra_time = 10;
+    extra_time = 1;
 else
     extra_time = 0;
 end

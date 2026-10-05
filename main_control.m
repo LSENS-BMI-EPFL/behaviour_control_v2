@@ -22,7 +22,8 @@ global Main_S_SR association_flag trial_duration quiet_window lick_threshold...
     ttl1_vec ttl2_vec TTL_info ttl1_edge_times_s ttl1_edge_states ttl1_edge_idx ...
     ttl2_edge_times_s ttl2_edge_states ttl2_edge_idx ...
     ttl1_current_state ttl2_current_state pdco_trial pdco_activation ...
-    session_stopping_flag
+    session_stopping_flag ...
+    ttl1_pulse_pending ttl1_pending_edge_times_s ttl1_pending_edge_states ttl1_pulse_active ttl1_pulse_start_time
         
     % prevents main_control from doing anything during shutdown
     if ~isempty(session_stopping_flag) && session_stopping_flag
@@ -76,54 +77,76 @@ global Main_S_SR association_flag trial_duration quiet_window lick_threshold...
         trial_time = toc(session_start_time);
 
         % Reset TTL edge playback state for this trial
-        ttl1_edge_idx = 1;
-        ttl2_edge_idx = 1;
-        ttl1_current_state = false;
-        ttl2_current_state = false;
+% TTL2 - safe to reset unconditionally every trial (see above).
+ttl2_edge_idx = 1;
+ttl2_current_state = false;
 
-        try
-            if ~isempty(TTL_S)
-                outputSingleScan(TTL_S, [0 0]);
-            end
-        catch
-        end
+% TTL1 - if a pulse from a prior (aborted) attempt is still in flight,
+% leave it completely alone: it keeps playing against its own clock,
+% uninterrupted by this new trial attempt starting. Only anchor a
+% freshly pending pulse.
+if ~isempty(ttl1_pulse_pending) && ttl1_pulse_pending
+    ttl1_edge_times_s = ttl1_pending_edge_times_s;
+    ttl1_edge_states = ttl1_pending_edge_states;
+    ttl1_edge_idx = 1;
+    ttl1_current_state = false;
+    ttl1_pulse_start_time = tic;
+    ttl1_pulse_active = true;
+    ttl1_pulse_pending = false;
+    ttl1_pending_edge_times_s = [];
+    ttl1_pending_edge_states = [];
+end
+
+try
+    if ~isempty(TTL_S)
+        % Re-assert current state rather than forcing both lines low -
+        % must not clobber an in-flight TTL1 pulse.
+        outputSingleScan(TTL_S, [double(ttl1_current_state) double(ttl2_current_state)]);
+    end
+catch
+end
     end
 
     %% Non-blocking TTL edge playback
-    if isfield(handles2give,'ttl_session') && handles2give.ttl_session && ...
-            ~isempty(TTL_S)
+if isfield(handles2give,'ttl_session') && handles2give.ttl_session && ...
+        ~isempty(TTL_S)
 
-        t_now = toc(trial_start_time);
+    ttl_changed = false;
 
-        ttl_changed = false;
+    % TTL1 - timed against its own independent clock so it plays out
+    % fully regardless of trial boundaries/aborts.
+    if ~isempty(ttl1_pulse_active) && ttl1_pulse_active
+        t_now_ttl1 = toc(ttl1_pulse_start_time);
 
-        % Process all TTL1 edges that are due
         while ~isempty(ttl1_edge_times_s) && ttl1_edge_idx <= numel(ttl1_edge_times_s) && ...
-                t_now >= ttl1_edge_times_s(ttl1_edge_idx)
-
+                t_now_ttl1 >= ttl1_edge_times_s(ttl1_edge_idx)
             ttl1_current_state = logical(ttl1_edge_states(ttl1_edge_idx));
             ttl1_edge_idx = ttl1_edge_idx + 1;
             ttl_changed = true;
         end
 
-        % Process all TTL2 edges that are due
-        while ~isempty(ttl2_edge_times_s) && ttl2_edge_idx <= numel(ttl2_edge_times_s) && ...
-                t_now >= ttl2_edge_times_s(ttl2_edge_idx)
-
-            ttl2_current_state = logical(ttl2_edge_states(ttl2_edge_idx));
-            ttl2_edge_idx = ttl2_edge_idx + 1;
-            ttl_changed = true;
-        end
-
-        % Apply combined TTL state only when something changed
-        if ttl_changed
-            try
-                outputSingleScan(TTL_S, [double(ttl1_current_state) double(ttl2_current_state)]);
-            catch
-            end
-            disp(t_now)
+        if ttl1_edge_idx > numel(ttl1_edge_times_s)
+            ttl1_pulse_active = false; % pulse fully played out
         end
     end
+
+    % TTL2 - unchanged, still timed against trial_start_time.
+    t_now = toc(trial_start_time);
+
+    while ~isempty(ttl2_edge_times_s) && ttl2_edge_idx <= numel(ttl2_edge_times_s) && ...
+            t_now >= ttl2_edge_times_s(ttl2_edge_idx)
+        ttl2_current_state = logical(ttl2_edge_states(ttl2_edge_idx));
+        ttl2_edge_idx = ttl2_edge_idx + 1;
+        ttl_changed = true;
+    end
+
+    if ttl_changed
+        try
+            outputSingleScan(TTL_S, [double(ttl1_current_state) double(ttl2_current_state)]);
+        catch
+        end
+    end
+end
     
     %% Detecting rewarded licks and trigger reward. 
     % --------------------------------------------
@@ -228,7 +251,7 @@ end
             elseif ~is_stim && mouse_licked_flag
                 main_gui.set_online_text('False Alarm', [0 0 0]);
                 lick_flag=1;
-                perf=5; 
+                perf=5;
 
                 try
                     if ~isempty(Reward_S)
@@ -302,17 +325,19 @@ end
         end
 
         % Force TTL lines low
-        try
-            if ~isempty(TTL_S)
-                outputSingleScan(TTL_S, [0 0]);
-            end
-        catch
-        end
+% TTL2 forced low/reset - safe, it can never have started yet at this
+% point (early licks are only caught during the baseline window).
+% TTL1 is deliberately left alone: if a PdCO on-pulse is currently in
+% flight, it must keep playing through this abort, not get cut short.
+try
+    if ~isempty(TTL_S)
+        outputSingleScan(TTL_S, [double(ttl1_current_state) 0]);
+    end
+catch
+end
 
-        ttl1_current_state = false;
-        ttl2_current_state = false;
-        ttl1_edge_idx = 1;
-        ttl2_edge_idx = 1;
+ttl2_current_state = false;
+ttl2_edge_idx = 1;
 
         outputSingleScan(Trigger_S, [0 0 0]);
 

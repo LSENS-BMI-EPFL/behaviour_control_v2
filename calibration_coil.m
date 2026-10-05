@@ -117,14 +117,15 @@ elseif strcmp(stim_name,'biphasic_hann_3ms')
 
 elseif strcmp(stim_name, 'biphasic_hann_3ms_psy')
 
-    stim_amp_volt_max = 3.35;
+    stim_amp_volt_max = 2.4;
 
     % Define voltages to test
     stim_amp_volt_list = [
         stim_amp_volt_max;
         stim_amp_volt_max * 0.84;
-        stim_amp_volt_max * 0.66;
-        stim_amp_volt_max * 0.34;
+        stim_amp_volt_max * 0.67;
+        stim_amp_volt_max * 0.33;
+        stim_amp_volt_max * 0.17;
         ];
 
     stim_duration_up = 1.5;
@@ -164,7 +165,8 @@ if strcmp(stim_name,'biphasic_hann_3ms_psy')
     repmat(stim_amp_volt_list(1),n_trials,1); ...    
     repmat(stim_amp_volt_list(2),n_trials,1); ...    
     repmat(stim_amp_volt_list(3),n_trials,1); ...    
-    repmat(stim_amp_volt_list(4),n_trials,1); ...    
+    repmat(stim_amp_volt_list(4),n_trials,1); ...
+    repmat(stim_amp_volt_list(5),n_trials,1); ...
     ];
 
     stim_array = [ ...
@@ -172,6 +174,7 @@ if strcmp(stim_name,'biphasic_hann_3ms_psy')
     repmat(stim_array(2,:),n_trials,1); ...
     repmat(stim_array(3,:),n_trials,1); ...
     repmat(stim_array(4,:),n_trials,1); ...
+    repmat(stim_array(5,:),n_trials,1); ...
     ];
 
     % Update number of trials to send; init. data storage

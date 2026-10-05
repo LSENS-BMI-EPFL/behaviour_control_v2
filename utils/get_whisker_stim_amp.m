@@ -1,10 +1,27 @@
-function [wh_stim_amp, wh_stim_amp_mT] = get_whisker_stim_amp(handles2give)
+function [wh_stim_amp, wh_stim_amp_mT] = get_whisker_stim_amp(handles2give, is_retry)
 %GET_WHISKER_STIM_AMP Get whisker amplitude for current whisker trial.
 % If multiple amplitudes are enabled, this uses a shuffled amplitude pool,
 % so each amplitude appears exactly according to its weight before the pool
 % is reshuffled.
+%
+% IS_RETRY: true if this call is retrying the trial just aborted by an
+% early lick (perf==6). Returns the SAME amplitude used for the aborted
+% attempt without advancing the pool - otherwise a retried trial could
+% silently draw a different amplitude, throwing off the intended
+% per-amplitude trial counts within a psychometric block.
 
 global wh_stim_amp_pool wh_stim_amp_pool_idx wh_stim_amp_pool_key
+global wh_stim_amp_last wh_stim_amp_mT_last
+
+if nargin < 2
+    is_retry = false;
+end
+
+if is_retry && ~isempty(wh_stim_amp_last)
+    wh_stim_amp = wh_stim_amp_last;
+    wh_stim_amp_mT = wh_stim_amp_mT_last;
+    return
+end
 
 if handles2give.wh_stim_amp_range
 
@@ -29,53 +46,49 @@ if handles2give.wh_stim_amp_range
         handles2give.wh_stim_weight_4;
         handles2give.wh_stim_weight_5];
 
-    % Keep only amplitudes with positive weight
     valid_idx = wh_stim_weight_list > 0;
 
     wh_stim_amp_list = wh_stim_amp_list(valid_idx);
     wh_stim_amp_mT_list = wh_stim_amp_mT_list(valid_idx);
     wh_stim_weight_list = round(wh_stim_weight_list(valid_idx));
 
-    % Safety fallback
     if isempty(wh_stim_amp_list) || sum(wh_stim_weight_list) == 0
         wh_stim_amp = handles2give.wh_stim_amp_1;
         wh_stim_amp_mT = handles2give.wh_stim_amp_mT_1;
+        wh_stim_amp_last = wh_stim_amp;
+        wh_stim_amp_mT_last = wh_stim_amp_mT;
         return
     end
 
-    % Key detects GUI changes in amplitudes, mT values, and weights
     current_key = sprintf('%g_', [ ...
         wh_stim_amp_list(:); ...
         wh_stim_amp_mT_list(:); ...
         wh_stim_weight_list(:)]);
 
-    % Rebuild pool if empty, exhausted, or GUI settings changed
     if isempty(wh_stim_amp_pool) || isempty(wh_stim_amp_pool_idx) || ...
             wh_stim_amp_pool_idx > numel(wh_stim_amp_pool) || ...
             isempty(wh_stim_amp_pool_key) || ~strcmp(current_key, wh_stim_amp_pool_key)
 
         wh_stim_amp_pool = [];
-
-        % Store indices, not amplitudes
         for i = 1:numel(wh_stim_amp_list)
             wh_stim_amp_pool = [wh_stim_amp_pool; repmat(i, wh_stim_weight_list(i), 1)];
         end
-
         wh_stim_amp_pool = wh_stim_amp_pool(randperm(numel(wh_stim_amp_pool)));
         wh_stim_amp_pool_idx = 1;
         wh_stim_amp_pool_key = current_key;
     end
 
     selected_idx = wh_stim_amp_pool(wh_stim_amp_pool_idx);
-
     wh_stim_amp = wh_stim_amp_list(selected_idx);
     wh_stim_amp_mT = wh_stim_amp_mT_list(selected_idx);
-
     wh_stim_amp_pool_idx = wh_stim_amp_pool_idx + 1;
 
 else
     wh_stim_amp = handles2give.wh_stim_amp_1;
     wh_stim_amp_mT = handles2give.wh_stim_amp_mT_1;
 end
+
+wh_stim_amp_last = wh_stim_amp;
+wh_stim_amp_mT_last = wh_stim_amp_mT;
 
 end
