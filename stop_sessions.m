@@ -211,7 +211,7 @@ end
 %% Stop Opto_S
 try
     if ~isempty(handles2give) && isfield(handles2give,'opto_session') && handles2give.opto_session
-        global opto_stim_count opto_wh_count opto_aud_count opto_count stim_grid wh_grid aud_grid
+        global opto_stim_count opto_wh_count opto_aud_count opto_count stim_grid wh_grid aud_grid opto_stim_x
         try
             save_opto_config
         catch
@@ -228,6 +228,7 @@ try
                 aud_grid = [1, 1];
                 opto_aud_count = [1, 1];
                 opto_count = 1;
+                opto_stim_x = []; % forces grid re-init in get_next_grid next session
             end
         catch
         end

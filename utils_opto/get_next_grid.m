@@ -9,7 +9,7 @@ function [ML, AP, grid_no, count] = get_next_grid
 
     grid_type = opto_gui.grid; % get which grid info from gui
     
-    if trial_number == 1
+    if trial_number == 1 || isempty(opto_stim_x) % first opto trial may not be trial 1
         save_opto_config
 
         [stim_x, stim_y] = get_stim_grid(grid_type, opto_gui.AP_coord, opto_gui.ML_coord); % Retrieve the stim locations for desired grid
@@ -36,8 +36,6 @@ function [ML, AP, grid_no, count] = get_next_grid
         C2 = randperm(grid_size);
         opto_wh_x = [stim_x(C1); stim_x(C2)];
         opto_wh_y = [stim_y(C1); stim_y(C2)];
-
-        opto_count = 1;
     end
 
     opto_gui.plot_grid % Refresh plot in Opto_GUI

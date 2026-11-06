@@ -21,7 +21,7 @@ function opto_setup(trigger)
     
     % For old daq session configuration
     Opto_S = daq.createSession('ni');
-    addAnalogOutputChannel(Opto_S,'Dev3','ao4', 'Voltage');
+    addAnalogOutputChannel(Opto_S,'Dev3','ao4', 'Voltage'); % Laser output (ao4 on WF/galvo setups)
     addAnalogOutputChannel(Opto_S,'Dev3','ao5', 'Voltage');
     addAnalogOutputChannel(Opto_S,'Dev3','ao6', 'Voltage');
     Opto_S.Rate = 100000;

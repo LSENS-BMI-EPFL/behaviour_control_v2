@@ -2,7 +2,7 @@ function log_continuously(~, event)
 
 global  Log_S_SR fid_continuous ...
         trial_start_ttl lick_threshold handles2give continuous_lick_data cam1_ttl cam2_ttl ...
-        scan_pos context_flag context_ttl wh_rewarded_context ttl_ch1 ttl_ch2
+        scan_pos context_flag context_ttl wh_rewarded_context ttl_ch1 ttl_ch2 opto_trace
 
 % Channel map in acquisition order:
 % 1  -> ai0   : lick dummy
@@ -14,6 +14,8 @@ global  Log_S_SR fid_continuous ...
 % 6  -> ai5   : context transition
 % 7  -> ai6   : TTL ch1
 % 8  -> ai7   : TTL ch2
+% 9  -> ai16  : opto (laser command)
+% 10 -> ai17  : dummy
 
 %% Save data to binary file
 % event.Data is [samples x channels]
@@ -30,7 +32,7 @@ cam2          = event.Data(:,5).';
 context_trans = event.Data(:,6).';
 ttl1          = event.Data(:,7).';   % ai6
 ttl2          = event.Data(:,8).';   % ai7
-dummy_ch1     = event.Data(:,9).';   % ai16
+opto          = event.Data(:,9).';   % ai16
 dummy_ch2     = event.Data(:,10).';  % ai17
 %% Plot continuously
 
@@ -126,9 +128,23 @@ if ~isempty(time)
     xlim(handles2give.ScanAx, [0 time(end)]);
 end
 
-% ----------------------
-% Plot TTL ch1 and ch2
-% ----------------------
+% ----------------------------------------------------------
+% Plot opto signal (opto sessions) or TTL ch1/ch2 (otherwise)
+% ----------------------------------------------------------
+if isfield(handles2give,'opto_session') && handles2give.opto_session
+    opto_trace = [opto_trace, opto];
+    opto_trace = opto_trace(max(1, numel(opto_trace) - 10*Log_S_SR + 1):end);
+    time = (0:numel(opto_trace)-1) / Log_S_SR;
+
+    plot(handles2give.LightAx, time, opto_trace, 'b', 'LineWidth', 1);
+    ylabel(handles2give.LightAx, 'Opto');
+    xlabel(handles2give.LightAx, 'Time (s)');
+    if ~isempty(time)
+        xlim(handles2give.LightAx, [0 time(end)]);
+    end
+    return
+end
+
 ttl_ch1 = [ttl_ch1, ttl1];
 ttl_ch1 = ttl_ch1(max(1, numel(ttl_ch1) - 10*Log_S_SR + 1):end);
 

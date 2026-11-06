@@ -662,6 +662,9 @@ if handles2give.opto_session
 
     else
         [opto_vec, galv_x, galv_y] = load_opto_vec(5,-5);
+        if strcmp(opto_gui.grid, 'No Grid')
+            opto_vec(:) = -1; % no galvo to aim away: keep laser at off level
+        end
 
         AP = -5;
         ML = 5;
@@ -1221,27 +1224,23 @@ end
 
 outputSingleScan(Trigger_S,[0 0 0])
 
-if handles2give.opto_session && ~handles2give.wf_session
+if handles2give.opto_session
     try
-        queueOutputData(Opto_S, [opto_vec; galv_x; galv_y]')
-        pause(.1)
-
-    catch
-        disp(['Error preloading Opto_S coords ap ml: ' num2str(AP) ' ' num2str(ML)])
-        disp(Opto_S)
-    end
-    Opto_S.startBackground();
-
-elseif handles2give.opto_session && handles2give.wf_session
-    try
+        if Opto_S.IsRunning
+            Opto_S.stop();
+        end
+        if ~handles2give.wf_session
+            queueOutputData(Opto_S, [opto_vec; galv_x; galv_y]')
+        else
         queueOutputData(Opto_S, [opto_vec(1:end-1); galv_x(1:end-1); galv_y(1:end-1); wf_cam_vec]')
+        end
         pause(.1)
+        Opto_S.startBackground();
 
-    catch
-        disp(['Error preloading Opto_S coords ap ml: ' num2str(AP) ' ' num2str(ML)])
-        disp(Opto_S)
+    catch ME
+        disp('Opto_S preload/start failed:');
+        disp(getReport(ME));
     end
-    Opto_S.startBackground();
 end
 
 % Queue reward vector
