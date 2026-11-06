@@ -453,7 +453,12 @@ ttl2_edge_idx = 1;
 
         update_parameters_flag=0;
 
-        update_parameters;
+        try
+            update_parameters;
+        catch ME
+            disp(getReport(ME));
+            rethrow(ME);
+        end
 
     elseif update_parameters_flag && Stim_S.IsDone &&...
             (~reward_delivered_flag || Reward_S.ScansQueued==0) && handles2give.PauseRequested && handles2give.ReportPause
